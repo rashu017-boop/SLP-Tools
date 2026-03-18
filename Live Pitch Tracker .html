@@ -1,0 +1,302 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Pitch Pro - High Visibility</title>
+        <style>
+            body { background: #0f172a; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; overflow: hidden; }
+            .card { background: #1e293b; padding: 20px; border-radius: 24px; width: 95vw; height: 92vh; max-width: 1400px; border: 1px solid #334155; box-shadow: 0 25px 50px rgba(0,0,0,0.5); display: flex; flex-direction: column; gap: 12px; }
+            
+            .top-bar { display: flex; align-items: center; justify-content: space-between; background: #0f172a; padding: 12px 20px; border-radius: 16px; border: 1px solid #334155; gap: 15px; }
+            .stats { display: flex; align-items: center; gap: 20px; }
+            
+            .note-circle { width: 65px; height: 65px; border-radius: 50%; border: 3px solid #334155; display: flex; align-items: center; justify-content: center; font-size: 1.8rem; font-weight: 800; color: #64748b; background: #1e293b; transition: all 0.2s; }
+            .note-active { border-color: #38bdf8; color: #fff; background: #075985; box-shadow: 0 0 15px rgba(56, 189, 248, 0.3); }
+            
+            /* PROMINENT VISUAL REINFORCEMENT */
+            .lock-indicator { 
+                padding: 10px 25px; 
+                border-radius: 50px; 
+                background: #1e293b; 
+                border: 2px solid #334155; 
+                color: #334155; 
+                font-weight: 900; 
+                letter-spacing: 2px; 
+                transition: all 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .lock-on { 
+                background: #059669; 
+                border-color: #34d399; 
+                color: white; 
+                box-shadow: 0 0 30px rgba(16, 185, 129, 0.6);
+                transform: scale(1.1);
+            }
+            .lock-bulb { width: 12px; height: 12px; border-radius: 50%; background: currentColor; }
+
+            .hz-main { font-size: 2.5rem; font-weight: 800; color: #38bdf8; font-variant-numeric: tabular-nums; min-width: 120px; }
+            
+            .metric-group { display: flex; gap: 8px; }
+            .metric { background: #0f172a; padding: 8px 15px; border-radius: 12px; border: 1px solid #334155; text-align: center; min-width: 80px; }
+            .metric-val { font-size: 1.3rem; font-weight: 800; color: #10b981; display: block; }
+            .metric-label { font-size: 0.6rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.1em; }
+            .high-score { color: #f59e0b; }
+
+            .trainer-panel { background: #1e293b; padding: 12px; border-radius: 16px; border: 1px solid #475569; display: flex; flex-wrap: wrap; align-items: center; gap: 20px; justify-content: center; }
+            .control-item { display: flex; flex-direction: column; gap: 4px; }
+            .label-sm { font-size: 0.65rem; color: #94a3b8; font-weight: 700; text-transform: uppercase; }
+            
+            select { background: #0f172a; color: white; border: 1px solid #334155; padding: 6px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+            input[type=range] { width: 110px; accent-color: #38bdf8; cursor: pointer; }
+
+            .ref-btn { background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: 800; cursor: pointer; transition: 0.2s; }
+            .ref-btn.playing { background: #ef4444; }
+
+            .canvas-container { flex: 1; background: #000; border-radius: 12px; border: 1px solid #334155; overflow: hidden; }
+            canvas { width: 100%; height: 100%; display: block; }
+
+            .bottom-bar { display: flex; gap: 10px; }
+            .btn-action { flex: 1; border: none; padding: 14px; border-radius: 12px; font-weight: 800; cursor: pointer; transition: 0.2s; }
+            #startBtn { background: #38bdf8; color: #0f172a; }
+            #stopBtn { background: #ef4444; color: white; display: none; }
+            #clearBtn { background: #475569; color: white; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div class="top-bar">
+                <div class="stats">
+                    <div class="note-circle" id="noteBox">-</div>
+                    <div class="hz-main" id="hzDisplay">0<span style="font-size:1rem;color:#94a3b8">Hz</span></div>
+                    
+                    <div class="lock-indicator" id="lockIndicator">
+                        <div class="lock-bulb"></div>
+                        <span>TARGET LOCK</span>
+                    </div>
+
+                    <div class="metric-group">
+                        <div class="metric"><span class="metric-val" id="timerVal">0.0s</span><span class="metric-label">Hold</span></div>
+                        <div class="metric"><span class="metric-val high-score" id="highScoreVal">0.0s</span><span class="metric-label">Best</span></div>
+                    </div>
+                </div>
+
+                <div class="trainer-panel">
+                    <div class="control-item">
+                        <span class="label-sm">Reference</span>
+                        <div style="display:flex; gap:5px">
+                            <select id="refNote">
+                                <option value="C">C</option><option value="C#">C#</option><option value="D">D</option>
+                                <option value="D#">D#</option><option value="E">E</option><option value="F">F</option>
+                                <option value="F#">F#</option><option value="G">G</option><option value="G#">G#</option>
+                                <option value="A" selected>A</option><option value="A#">A#</option><option value="B">B</option>
+                            </select>
+                            <select id="refOctave">
+                                <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+                                <option value="4" selected>4</option><option value="5">5</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button class="ref-btn" id="toggleRef">Hear Target</button>
+                    
+                    <div class="control-item">
+                        <span class="label-sm" id="sensLabel">Sensitivity: 85%</span>
+                        <input type="range" id="sensitivitySlider" min="0" max="100" value="85">
+                    </div>
+                    <div class="control-item">
+                        <span class="label-sm" id="minLabel">Min Y: 25Hz</span>
+                        <input type="range" id="minHzSlider" min="25" max="300" value="25">
+                    </div>
+                    <div class="control-item">
+                        <span class="label-sm" id="maxLabel">Max Y: 1000Hz</span>
+                        <input type="range" id="maxHzSlider" min="300" max="1500" value="1000">
+                    </div>
+                    <div class="control-item" style="align-items:center">
+                        <span class="label-sm">Guide</span>
+                        <input type="checkbox" id="showTarget" checked>
+                    </div>
+                </div>
+            </div>
+
+            <div class="canvas-container"><canvas id="pitchCanvas"></canvas></div>
+
+            <div class="bottom-bar">
+                <button id="startBtn" class="btn-action">Start Engine</button>
+                <button id="stopBtn" class="btn-action">Stop Engine</button>
+                <button id="clearBtn" class="btn-action">Clear Session</button>
+            </div>
+        </div>
+
+        <script>
+            let audioCtx, mic, analyzer, refOsc, isActive = false;
+            let pitchHistory = [], medianBuffer = [], smoothHz = 0, lastWasNull = true;
+            let steadyStartTime = null, lastSteadyHz = 0, highScore = 0;
+            const STEADY_THRESHOLD = 2.0;
+
+            const notes = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+            const canvas = document.getElementById('pitchCanvas');
+            const ctx = canvas.getContext('2d', { alpha: false });
+            
+            const sensSlider = document.getElementById('sensitivitySlider');
+            const minSlider = document.getElementById('minHzSlider');
+            const maxSlider = document.getElementById('maxHzSlider');
+            const refNoteSel = document.getElementById('refNote');
+            const refOctSel = document.getElementById('refOctave');
+            const toggleRefBtn = document.getElementById('toggleRef');
+            const lockIndicator = document.getElementById('lockIndicator');
+
+            function getFrequency(note, octave) {
+                const index = notes.indexOf(note);
+                return 440 * Math.pow(2, (index - 9 + (octave - 4) * 12) / 12);
+            }
+
+            async function startAudio() {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                if (audioCtx.state === 'suspended') await audioCtx.resume();
+            }
+
+            async function init() {
+                try {
+                    await startAudio();
+                    resize();
+                    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                    mic = audioCtx.createMediaStreamSource(stream);
+                    analyzer = audioCtx.createAnalyser();
+                    analyzer.fftSize = 4096;
+                    mic.connect(analyzer);
+                    isActive = true;
+                    document.getElementById('startBtn').style.display = 'none';
+                    document.getElementById('stopBtn').style.display = 'block';
+                    update();
+                } catch (e) { alert("Mic required."); }
+            }
+
+            function resize() {
+                canvas.width = canvas.offsetWidth * window.devicePixelRatio;
+                canvas.height = canvas.offsetHeight * window.devicePixelRatio;
+            }
+            window.onresize = resize;
+
+            function autoCorrelate(buffer, sampleRate) {
+                let sum = 0; for (let i = 0; i < buffer.length; i++) sum += buffer[i] * buffer[i];
+                let rms = Math.sqrt(sum / buffer.length);
+                const sens = parseFloat(sensSlider.value) / 100;
+                const threshold = 0.15 * Math.pow(0.00005 / 0.15, sens); 
+                if (rms < threshold) return -1;
+                let L = buffer.length / 2;
+                let c = new Float32Array(L).fill(0);
+                for (let i = 0; i < L; i++) {
+                    for (let j = 0; j < L - i; j++) c[i] += buffer[j] * buffer[j + i];
+                }
+                let d = 0; while (c[d] > c[d + 1]) d++;
+                let maxval = -1, T0 = -1;
+                for (let i = d; i < L; i++) {
+                    if (c[i] > maxval) { maxval = c[i]; T0 = i; }
+                }
+                if (T0 !== -1 && (c[T0] / c[0] > 0.4)) {
+                    let y1 = c[T0-1]||c[T0], y2 = c[T0], y3 = c[T0+1]||c[T0];
+                    let denom = (2 * y2 - y1 - y3);
+                    let delta = denom === 0 ? 0 : (y3 - y1) / (2 * denom);
+                    return sampleRate / (T0 + delta);
+                }
+                return -1;
+            }
+
+            function update() {
+                if (!isActive) return;
+                document.getElementById('sensLabel').textContent = `Sensitivity: ${sensSlider.value}%`;
+                document.getElementById('minLabel').textContent = `Min Y: ${minSlider.value}Hz`;
+                document.getElementById('maxLabel').textContent = `Max Y: ${maxSlider.value}Hz`;
+
+                const buffer = new Float32Array(analyzer.fftSize);
+                analyzer.getFloatTimeDomainData(buffer);
+                let rawFreq = autoCorrelate(buffer, audioCtx.sampleRate);
+                const targetHz = getFrequency(refNoteSel.value, parseInt(refOctSel.value));
+                const minH = parseInt(minSlider.value);
+                const maxH = parseInt(maxSlider.value);
+
+                if (rawFreq !== -1 && isFinite(rawFreq) && rawFreq >= minH && rawFreq <= maxH) {
+                    medianBuffer.push(rawFreq);
+                    if (medianBuffer.length > 3) medianBuffer.shift();
+                    let filteredFreq = [...medianBuffer].sort((a,b)=>a-b)[1] || rawFreq;
+                    if (lastWasNull) { smoothHz = filteredFreq; lastWasNull = false; steadyStartTime = Date.now(); lastSteadyHz = filteredFreq; }
+                    else {
+                        smoothHz = smoothHz + (filteredFreq - smoothHz) * 0.25;
+                        if (Math.abs(smoothHz - lastSteadyHz) > STEADY_THRESHOLD) { steadyStartTime = Date.now(); lastSteadyHz = smoothHz; }
+                    }
+                    document.getElementById('hzDisplay').innerHTML = Math.round(smoothHz) + "<span style='font-size:1rem;color:#94a3b8'>Hz</span>";
+                    const h = 12 * (Math.log(smoothHz / 440) / Math.log(2));
+                    const midi = Math.round(h) + 69;
+                    document.getElementById('noteBox').textContent = notes[midi % 12] + (Math.floor(midi / 12) - 1);
+                    document.getElementById('noteBox').classList.add('note-active');
+                    const duration = (Date.now() - steadyStartTime) / 1000;
+                    document.getElementById('timerVal').textContent = duration.toFixed(1) + "s";
+                    if (duration > highScore) { highScore = duration; document.getElementById('highScoreVal').textContent = highScore.toFixed(1) + "s"; }
+
+                    // Visual Reinforcement logic
+                    const diffRatio = Math.max(smoothHz, targetHz) / Math.min(smoothHz, targetHz);
+                    if (diffRatio < 1.03) lockIndicator.classList.add('lock-on');
+                    else lockIndicator.classList.remove('lock-on');
+                    pitchHistory.push(smoothHz);
+                } else {
+                    document.getElementById('hzDisplay').innerHTML = "0<span style='font-size:1rem;color:#94a3b8'>Hz</span>";
+                    document.getElementById('noteBox').textContent = "-";
+                    document.getElementById('noteBox').classList.remove('note-active');
+                    document.getElementById('timerVal').textContent = "0.0s";
+                    lockIndicator.classList.remove('lock-on');
+                    pitchHistory.push(null);
+                    medianBuffer = []; lastWasNull = true;
+                }
+                if (pitchHistory.length > 800) pitchHistory.shift();
+                draw(targetHz, minH, maxH);
+                requestAnimationFrame(update);
+            }
+
+            function draw(targetHz, minH, maxH) {
+                const W = canvas.width, H = canvas.height, pad = 100, margin = 60;
+                const gW = W - pad, gH = H - (margin * 2);
+                ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+                ctx.font = `${14 * window.devicePixelRatio}px Inter`; ctx.textAlign = 'right';
+                let step = (maxH - minH) > 500 ? 200 : 100;
+                for (let hz = minH; hz <= maxH; hz += step) {
+                    const y = H - margin - ((hz - minH) / (maxH - minH) * gH);
+                    ctx.strokeStyle = '#1e293b'; ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W, y); ctx.stroke();
+                    ctx.fillStyle = '#64748b'; ctx.fillText(hz + "Hz", pad - 20, y);
+                }
+                if (document.getElementById('showTarget').checked) {
+                    const ty = H - margin - ((targetHz - minH) / (maxH - minH) * gH);
+                    if (ty >= margin && ty <= H - margin) {
+                        ctx.setLineDash([10, 10]); ctx.strokeStyle = '#6366f1'; ctx.lineWidth = 2;
+                        ctx.beginPath(); ctx.moveTo(pad, ty); ctx.lineTo(W, ty); ctx.stroke(); ctx.setLineDash([]);
+                    }
+                }
+                ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 4 * window.devicePixelRatio;
+                ctx.lineJoin = 'round'; ctx.beginPath(); let started = false;
+                for (let i = 0; i < pitchHistory.length; i++) {
+                    const f = pitchHistory[i]; const x = pad + (i / 800) * gW;
+                    if (f === null || f < minH || f > maxH) { started = false; continue; }
+                    const y = H - margin - ((f - minH) / (maxH - minH) * gH);
+                    if (!started) { ctx.moveTo(x, y); started = true; } else { ctx.lineTo(x, y); }
+                }
+                ctx.stroke();
+            }
+
+            toggleRefBtn.onclick = async () => {
+                await startAudio();
+                if (refOsc) { refOsc.stop(); refOsc = null; toggleRefBtn.textContent = "Hear Target"; toggleRefBtn.classList.remove('playing'); }
+                else {
+                    refOsc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                    refOsc.frequency.setValueAtTime(getFrequency(refNoteSel.value, parseInt(refOctSel.value)), audioCtx.currentTime);
+                    refOsc.type = 'sine'; gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+                    refOsc.connect(gain); gain.connect(audioCtx.destination); refOsc.start();
+                    toggleRefBtn.textContent = "Stop Target"; toggleRefBtn.classList.add('playing');
+                }
+            };
+            document.getElementById('startBtn').onclick = init;
+            document.getElementById('stopBtn').onclick = () => { isActive = false; location.reload(); };
+            document.getElementById('clearBtn').onclick = () => { pitchHistory = []; highScore = 0; document.getElementById('highScoreVal').textContent = "0.0s"; };
+        </script>
+    </body>
+    </html>
+    

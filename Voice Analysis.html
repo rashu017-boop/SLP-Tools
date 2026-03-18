@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Voice Lab - v4.8 Playback Fix</title>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --primary: #38bdf8; --danger: #ef4444; --success: #22c55e; }
+        * { box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: var(--bg); color: white; display: flex; flex-direction: column; align-items: center; padding: 10px; }
+        .card { background: var(--card); padding: 20px; border-radius: 24px; width: 100%; max-width: 900px; border: 1px solid #334155; position: relative; }
+        .vu-container { background: #000; padding: 12px; border-radius: 12px; margin-bottom: 15px; border: 1px solid #334155; }
+        .vu-meter-bg { height: 8px; background: #1e293b; border-radius: 4px; overflow: hidden; }
+        #vu-fill { height: 100%; width: 0%; background: var(--success); transition: width 0.05s linear; }
+        #waveform-container { background: #000; height: 180px; position: relative; margin: 15px 0; border-radius: 12px; border: 1px solid #475569; overflow: hidden; }
+        canvas { width: 100%; height: 100%; cursor: crosshair; }
+        #selection-overlay { position: absolute; top: 0; height: 100%; background: rgba(56, 189, 248, 0.2); border-left: 2px solid var(--primary); border-right: 2px solid var(--primary); display: none; pointer-events: none; }
+        .results-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; }
+        .metric { background: #0f172a; padding: 12px; border-radius: 12px; border-bottom: 3px solid var(--primary); }
+        .metric label { font-size: 0.65rem; color: #94a3b8; text-transform: uppercase; }
+        .metric div { font-size: 1.1rem; font-weight: 800; margin-top: 4px; color: var(--primary); }
+        .btn-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 10px; }
+        button { padding: 14px; border-radius: 12px; border: none; font-weight: 800; cursor: pointer; font-size: 0.9rem; transition: 0.2s; }
+        #recBtn { background: var(--primary); color: #0f172a; }
+        #recBtn.active { background: var(--danger); color: white; }
+        #playBtn, #analyzeBtn { background: #475569; color: white; }
+        button:disabled { opacity: 0.2; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="vu-container">
+            <div style="display:flex; justify-content:space-between; font-size:0.6rem; margin-bottom:4px; color:#94a3b8;"><span>INPUT MONITOR</span><span id="db-val">-∞ dB</span></div>
+            <div class="vu-meter-bg"><div id="vu-fill"></div></div>
+        </div>
+        <div class="btn-group">
+            <button id="recBtn">Record</button>
+            <button id="playBtn" disabled>Play Selection</button>
+            <button id="analyzeBtn" disabled>Analyze</button>
+        </div>
+        <div id="waveform-container"><canvas id="canvas"></canvas><div id="selection-overlay"></div></div>
+        <div class="results-grid">
+            <div class="metric"><label>Mean F0</label><div id="f0">--</div></div>
+            <div class="metric"><label>Jitter (local)</label><div id="jit">--</div></div>
+            <div class="metric"><label>Shimmer (local)</label><div id="shim">--</div></div>
+            <div class="metric"><label>HNR (dB)</label><div id="hnr">--</div></div>
+            <div class="metric"><label>CPPS (dB)</label><div id="cpps">--</div></div>
+            <div class="metric"><label>Voiced %</label><div id="voiced">--</div></div>
+        </div>
+    </div>
+    <script>
+        let audioCtx, recorder, chunks = [], audioBuffer = null, isRec = false;
+        let analyzer, dataArray, animationId, sel = { s: 0, e: 0, active: false };
+        const canvas = document.getElementById('canvas'), overlay = document.getElementById('selection-overlay');
+        const recBtn = document.getElementById('recBtn'), playBtn = document.getElementById('playBtn'), analyzeBtn = document.getElementById('analyzeBtn');
+
+        // Standard FFT for analysis
+        function fft(re, im) {
+            const n = re.length; if (n <= 1) return;
+            let reE = new Float32Array(n/2), imE = new Float32Array(n/2), reO = new Float32Array(n/2), imO = new Float32Array(n/2);
+            for (let i = 0; i < n/2; i++) { reE[i] = re[2*i]; imE[i] = im[2*i]; reO[i] = re[2*i+1]; imO[i] = im[2*i+1]; }
+            fft(reE, imE); fft(reO, imO);
+            for (let i = 0; i < n/2; i++) {
+                let a = -2 * Math.PI * i / n;
+                let tRe = reO[i] * Math.cos(a) - imO[i] * Math.sin(a), tIm = reO[i] * Math.sin(a) + imO[i] * Math.cos(a);
+                re[i] = reE[i] + tRe; im[i] = imE[i] + tIm; re[i+n/2] = reE[i] - tRe; im[i+n/2] = imE[i] - tIm;
+            }
+        }
+
+        recBtn.onclick = async () => {
+            if (!isRec) {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false } });
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 44100 });
+                const source = audioCtx.createMediaStreamSource(stream);
+                analyzer = audioCtx.createAnalyser(); analyzer.fftSize = 256;
+                source.connect(analyzer); dataArray = new Uint8Array(analyzer.frequencyBinCount);
+                recorder = new MediaRecorder(stream);
+                chunks = []; recorder.ondataavailable = e => chunks.push(e.data);
+                recorder.onstop = async () => {
+                    const blob = new Blob(chunks, { type: 'audio/wav' });
+                    audioBuffer = await audioCtx.decodeAudioData(await blob.arrayBuffer());
+                    drawWave(); playBtn.disabled = analyzeBtn.disabled = false;
+                    stream.getTracks().forEach(t => t.stop());
+                };
+                recorder.start(); isRec = true; recBtn.innerText = "Stop"; recBtn.classList.add('active'); updateVU();
+            } else { recorder.stop(); isRec = false; cancelAnimationFrame(animationId); recBtn.innerText = "Record"; recBtn.classList.remove('active'); }
+        };
+
+        function updateVU() {
+            if (!isRec) return;
+            analyzer.getByteFrequencyData(dataArray);
+            let sum = 0; for (let i = 0; i < dataArray.length; i++) sum += (dataArray[i] * dataArray[i]);
+            let rms = Math.sqrt(sum / dataArray.length);
+            document.getElementById('vu-fill').style.width = Math.min(100, (rms/128)*100) + '%';
+            let db = 20 * Math.log10(rms / 255);
+            document.getElementById('db-val').innerText = isFinite(db) ? db.toFixed(1) + " dB" : "-∞ dB";
+            animationId = requestAnimationFrame(updateVU);
+        }
+
+        function drawWave() {
+            const ctx = canvas.getContext('2d'); canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight;
+            const data = audioBuffer.getChannelData(0); const step = Math.ceil(data.length / canvas.width);
+            ctx.clearRect(0,0,canvas.width,canvas.height); ctx.strokeStyle = "#38bdf8"; ctx.lineWidth = 1; ctx.beginPath();
+            for(let i=0; i<canvas.width; i++){
+                let min=1, max=-1; for(let j=0; j<step; j++){ let d=data[i*step+j]; if(d<min)min=d; if(d>max)max=d; }
+                ctx.moveTo(i,(1+min)*canvas.height/2); ctx.lineTo(i,(1+max)*canvas.height/2);
+            }
+            ctx.stroke(); sel.s = 0; sel.e = canvas.width; overlay.style.display = 'block'; overlay.style.left = "0px"; overlay.style.width = canvas.width + "px";
+        }
+
+        // --- PLAYBACK ENGINE FIX ---
+        playBtn.onclick = async () => {
+            if (!audioBuffer) return;
+            // 1. Force Resume (Required for Chrome/Safari)
+            if (audioCtx.state === 'suspended') await audioCtx.resume();
+            
+            const data = audioBuffer.getChannelData(0);
+            const startFrame = Math.floor((Math.min(sel.s, sel.e) / canvas.width) * data.length);
+            const endFrame = Math.floor((Math.max(sel.s, sel.e) / canvas.width) * data.length);
+            const frameCount = Math.max(1, endFrame - startFrame);
+
+            // 2. Create a fresh buffer for the selection
+            const playBuf = audioCtx.createBuffer(1, frameCount, audioCtx.sampleRate);
+            playBuf.copyToChannel(data.slice(startFrame, endFrame), 0);
+
+            // 3. Setup Routing
+            const source = audioCtx.createBufferSource();
+            source.buffer = playBuf;
+            
+            // Add a Gain Node to prevent clipping and ensure audibility
+            const gainNode = audioCtx.createGain();
+            gainNode.gain.value = 1.0; 
+
+            source.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            
+            source.start(0);
+            console.log("Playback started: Frames " + startFrame + " to " + endFrame);
+        };
+
+        const getX = e => { const r = canvas.getBoundingClientRect(); return Math.max(0, Math.min(((e.touches ? e.touches[0].clientX : e.clientX) - r.left), canvas.width)); };
+        canvas.onmousedown = e => { sel.active = true; sel.s = getX(e); };
+        window.onmousemove = e => { if(sel.active){ sel.e = getX(e); overlay.style.left = Math.min(sel.s, sel.e)+"px"; overlay.style.width = Math.abs(sel.e-sel.s)+"px"; }};
+        window.onmouseup = () => sel.active = false;
+
+        analyzeBtn.onclick = () => {
+            const data = audioBuffer.getChannelData(0);
+            const start = Math.floor((Math.min(sel.s, sel.e)/canvas.width)*data.length);
+            const end = Math.floor((Math.max(sel.s, sel.e)/canvas.width)*data.length);
+            let segment = data.slice(start, end);
+            const mean = segment.reduce((a,b)=>a+b,0)/segment.length;
+            segment = segment.map(v => v - mean);
+            const res = runPraat(segment, 44100);
+            document.getElementById('f0').innerText = res.f0 + " Hz";
+            document.getElementById('jit').innerText = res.jit + " %";
+            document.getElementById('shim').innerText = res.shim + " %";
+            document.getElementById('hnr').innerText = res.hnr + " dB";
+            document.getElementById('cpps').innerText = res.cpps + " dB";
+            document.getElementById('voiced').innerText = res.voiced + " %";
+        };
+
+        function runPraat(samples, sr) {
+            const win = 2048, step = 512;
+            let periods = [], peakAmps = [], hnr_vals = [], cpps_vals = [];
+            let vF = 0, tF = 0;
+            for (let i = 0; i < samples.length - win; i += step) {
+                tF++; const frame = samples.slice(i, i+win);
+                const wind = frame.map((v,n) => v * (0.54 - 0.46 * Math.cos(2 * Math.PI * n / (win-1))));
+                let energy = wind.reduce((a,b)=>a+b*b,0);
+                if(energy < 1e-6) continue;
+                let rMax = -1, tMax = -1;
+                for(let t=Math.floor(sr/400); t<Math.floor(sr/60); t++){
+                    let r=0; for(let j=0; j<win-t; j++) r += wind[j]*wind[j+t];
+                    let nR = r/energy; if(nR > rMax){ rMax = nR; tMax = t; }
+                }
+                if(rMax > 0.45){
+                    vF++; periods.push(tMax/sr);
+                    const cycle = samples.slice(i, i + tMax);
+                    let cyclePeak = 0; for(let s=0; s<cycle.length; s++) { let absV = Math.abs(cycle[s]); if(absV > cyclePeak) cyclePeak = absV; }
+                    peakAmps.push(cyclePeak);
+                    hnr_vals.push(10 * Math.log10(Math.max(0.0001, rMax / (1.0001 - rMax))));
+                    cpps_vals.push(calcCPPS(wind, sr));
+                }
+            }
+            if(periods.length < 5) return {f0:"0", jit:"0", shim:"0", hnr:"0", cpps:"0", voiced:"0"};
+            const mP = periods.reduce((a,b)=>a+b)/periods.length;
+            const mA = peakAmps.reduce((a,b)=>a+b)/peakAmps.length;
+            let jSum=0; for(let i=0; i<periods.length-1; i++) jSum += Math.abs(periods[i]-periods[i+1]);
+            let sSum=0; for(let i=0; i<peakAmps.length-1; i++) sSum += Math.abs(peakAmps[i]-peakAmps[i+1]);
+            const jit = (jSum / (periods.length - 1)) / mP * 100;
+            const shim = (sSum / (peakAmps.length - 1)) / mA * 100;
+            return { f0: (1/mP).toFixed(1), jit: jit.toFixed(3), shim: shim.toFixed(3), hnr: (hnr_vals.reduce((a,b)=>a+b)/hnr_vals.length).toFixed(2), cpps: (cpps_vals.reduce((a,b)=>a+b)/cpps_vals.length).toFixed(2), voiced: (vF/tF*100).toFixed(1) };
+        }
+
+        function calcCPPS(frame, sr) {
+            const n = frame.length; let re = new Float32Array(frame), im = new Float32Array(n);
+            fft(re, im);
+            let logM = new Float32Array(n); for(let i=0; i<n; i++) logM[i] = Math.log(re[i]*re[i] + im[i]*im[i] + 1e-12);
+            let cre = new Float32Array(logM), cim = new Float32Array(n); fft(cre, cim);
+            let peak = -Infinity, sumY = 0, count = 0;
+            const qS = Math.floor(0.0025 * sr), qE = Math.floor(0.016 * sr);
+            for(let i=10; i < n/2; i++) { let val = Math.abs(cre[i]); if(i >= qS && i <= qE) if(val > peak) peak = val; sumY += val; count++; }
+            const avg = sumY / count; return peak === -Infinity ? 0 : (10 * Math.log10(Math.max(1, peak / (avg * 0.85))));
+        }
+    </script>
+</body>
+</html>

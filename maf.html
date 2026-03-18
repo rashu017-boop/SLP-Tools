@@ -1,0 +1,165 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>MAF Pro - Locked Hold Range</title>
+        <style>
+            body { background: #0f172a; color: #f8fafc; font-family: 'Inter', system-ui, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; }
+            .card { background: #1e293b; padding: 35px; border-radius: 32px; width: 440px; border: 1px solid #334155; box-shadow: 0 25px 50px rgba(0,0,0,0.5); text-align: center; }
+            h2 { color: #f472b6; margin: 0 0 10px 0; }
+            .panel { background: #0f172a; padding: 18px; border-radius: 20px; margin-bottom: 12px; text-align: left; border: 1px solid #1e293b; }
+            .label-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 600; font-size: 0.85em; }
+            select, input[type=range] { width: 100%; cursor: pointer; border-radius: 8px; }
+            select { background: #334155; color: white; border: none; padding: 10px; margin-bottom: 5px; }
+            input[type=range] { accent-color: #f472b6; }
+            .val { color: #f472b6; font-family: monospace; }
+            button { background: #f472b6; border: none; padding: 18px; border-radius: 14px; color: #fff; font-weight: 800; cursor: pointer; width: 100%; margin-top: 10px; transition: 0.2s; }
+            .meter-bg { width: 100%; height: 6px; background: #334155; border-radius: 3px; margin-top: 10px; overflow: hidden; }
+            #meterFill { width: 0%; height: 100%; background: #f472b6; transition: width 0.05s; }
+            .active-light { width: 10px; height: 10px; background: #475569; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: middle; }
+            .lit { background: #f472b6; box-shadow: 0 0 10px #f472b6; }
+            .footer-note { font-size: 0.75em; color: #64748b; margin-top: 20px; padding: 10px; border-top: 1px solid #334155; line-height: 1.4; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <h2>MAF Pro</h2>
+            <p style="color: #94a3b8; font-size: 0.8em; margin-bottom: 20px;">Continuous & Intelligent Masking</p>
+            
+            <div class="panel">
+                <div class="label-row"><span>Operating Mode</span></div>
+                <select id="mode">
+                    <option value="continuous" selected>Continuous Mode (Default)</option>
+                    <option value="voice">Voice Activated (MAF)</option>
+                </select>
+                <div class="label-row" style="margin-top:15px;"><span>Noise Type</span></div>
+                <select id="noiseType">
+                    <option value="pink" selected>Pink Noise (Deep/Natural)</option>
+                    <option value="white">White Noise (Full Static)</option>
+                </select>
+            </div>
+
+            <div class="panel">
+                <div class="label-row"><span>Volume</span> <span id="vVal" class="val">50%</span></div>
+                <input type="range" id="volume" min="0" max="100" value="50">
+            </div>
+
+            <div class="panel">
+                <div class="label-row">
+                    <span><div id="statusLight" class="active-light"></div> Sensitivity</span> 
+                    <span id="sVal" class="val">High</span>
+                </div>
+                <input type="range" id="threshold" min="1" max="100" value="10">
+                <div class="meter-bg"><div id="meterFill"></div></div>
+            </div>
+
+            <div id="holdPanel" class="panel" style="display: none;">
+                <div class="label-row"><span>Hold Duration</span> <span id="hVal" class="val">1.0s</span></div>
+                <input type="range" id="holdTime" min="1.0" max="5.0" step="0.1" value="1.0">
+            </div>
+
+            <button id="btn">Start Audio</button>
+            
+            <div class="footer-note">
+                <b>Note:</b> For best results in Voice Activated mode, please use in a <b>quiet environment</b> to prevent room noise from triggering the mask.
+            </div>
+        </div>
+
+        <script>
+            let audioCtx, mic, noiseSource, analyzer, gainNode, isActive = false;
+            let lastVoiceTime = 0;
+            let whiteBuffer, pinkBuffer;
+
+            const btn = document.getElementById('btn');
+            const vIn = document.getElementById('volume');
+            const tIn = document.getElementById('threshold');
+            const hIn = document.getElementById('holdTime');
+            const mSel = document.getElementById('mode');
+            const nSel = document.getElementById('noiseType');
+            const meterFill = document.getElementById('meterFill');
+            const statusLight = document.getElementById('statusLight');
+            const holdPanel = document.getElementById('holdPanel');
+
+            mSel.onchange = () => {
+                holdPanel.style.display = mSel.value === 'voice' ? 'block' : 'none';
+            };
+
+            function createBuffers() {
+                const bufferSize = 2 * audioCtx.sampleRate;
+                whiteBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                pinkBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const wData = whiteBuffer.getChannelData(0);
+                const pData = pinkBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) wData[i] = Math.random() * 2 - 1;
+                let b0, b1, b2, b3, b4, b5, b6; b0=b1=b2=b3=b4=b5=b6=0;
+                for (let i = 0; i < bufferSize; i++) {
+                    let w = Math.random() * 2 - 1;
+                    b0 = 0.99886 * b0 + w * 0.0555179; b1 = 0.99332 * b1 + w * 0.0750759; b2 = 0.96900 * b2 + w * 0.1538520;
+                    b3 = 0.86650 * b3 + w * 0.3104856; b4 = 0.55000 * b4 + w * 0.5329522; b5 = -0.7616 * b5 - w * 0.0168980;
+                    pData[i] = (b0 + b1 + b2 + b3 + b4 + b5 + b6 + w * 0.5362) * 0.11; b6 = w * 0.115926;
+                }
+            }
+
+            async function init() {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                createBuffers();
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mic = audioCtx.createMediaStreamSource(stream);
+                analyzer = audioCtx.createAnalyser();
+                analyzer.fftSize = 256;
+                mic.connect(analyzer);
+                noiseSource = audioCtx.createBufferSource();
+                noiseSource.buffer = (nSel.value === 'white') ? whiteBuffer : pinkBuffer;
+                noiseSource.loop = true;
+                gainNode = audioCtx.createGain();
+                gainNode.gain.value = 0;
+                noiseSource.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                noiseSource.start();
+                isActive = true;
+                btn.textContent = "Stop Session";
+                btn.style.background = "#ef4444";
+                process();
+            }
+
+            function process() {
+                if (!isActive) return;
+                const dataArray = new Uint8Array(analyzer.frequencyBinCount);
+                analyzer.getByteFrequencyData(dataArray);
+                let sum = 0;
+                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+                let level = sum / dataArray.length;
+                meterFill.style.width = Math.min(100, level * 2.5) + "%";
+                const targetVol = vIn.value / 100;
+                const now = Date.now();
+
+                if (mSel.value === 'voice') {
+                    if (level > parseInt(tIn.value)) {
+                        lastVoiceTime = now;
+                    }
+                    const holdMs = parseFloat(hIn.value) * 1000;
+                    if ((now - lastVoiceTime) < holdMs) {
+                        gainNode.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.01);
+                        statusLight.classList.add('lit');
+                    } else {
+                        gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.2);
+                        statusLight.classList.remove('lit');
+                    }
+                } else {
+                    gainNode.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.05);
+                    statusLight.classList.add('lit');
+                }
+                requestAnimationFrame(process);
+            }
+
+            btn.onclick = () => { if (!isActive) init(); else location.reload(); };
+            vIn.oninput = (e) => document.getElementById('vVal').textContent = e.target.value + "%";
+            hIn.oninput = (e) => document.getElementById('hVal').textContent = e.target.value + "s";
+            tIn.oninput = (e) => {
+                let v = e.target.value;
+                document.getElementById('sVal').textContent = v < 30 ? "High" : (v < 60 ? "Medium" : "Low");
+            };
+        </script>
+    </body>
+    </html>
+    

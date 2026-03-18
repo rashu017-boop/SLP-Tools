@@ -1,0 +1,201 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Hero: Reset Feature v14.2.0</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        :root { --primary: #FF9F1C; --secondary: #2EC4B6; --bg: #FDFFFC; --text: #011627; --error: #E71D36; --gold: #FFD700; --neutral: #718096; }
+        body { font-family: 'Comic Sans MS', 'Chalkboard SE', cursive, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; }
+        .card { width: 100%; max-width: 650px; background: white; padding: 30px; border-radius: 30px; border: 6px solid var(--secondary); text-align: center; min-height: 600px; display: flex; flex-direction: column; justify-content: space-between; align-items: center; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255,255,255,0.96); border-radius: 24px; z-index: 20; flex-direction: column; align-items: center; justify-content: center; }
+        #calibrationOverlay { background: rgba(46, 196, 182, 0.95); color: white; }
+        .control-panel { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 15px 0; width: 100%; }
+        .control-group { background: #f0fdfc; padding: 10px; border-radius: 15px; border: 1px solid #e0f7f5; }
+        .label-row { display: flex; flex-direction: column; font-weight: bold; color: var(--secondary); font-size: 11px; margin-bottom: 5px; }
+        .val-text { color: var(--primary); font-size: 13px; }
+        input[type="range"] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+        .circle-container { position: relative; width: 220px; height: 220px; margin: 20px 0; }
+        #syllableCircle { transform: rotate(-90deg); }
+        .circle-bg { fill: none; stroke: #eee; stroke-width: 15; }
+        .circle-progress { fill: none; stroke: var(--secondary); stroke-width: 15; stroke-linecap: round; transition: stroke-dasharray 0.05s linear; }
+        .quarter-marks { fill: none; stroke: white; stroke-width: 2; stroke-dasharray: 2, 155.1; }
+        #character { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 60px; }
+        #starCounter { font-size: 24px; color: var(--primary); font-weight: bold; }
+        .btn-row { display: flex; gap: 10px; margin-top: 10px; width: 100%; }
+        .btn { flex: 1; color: white; border: none; padding: 12px 5px; border-radius: 50px; cursor: pointer; font-weight: bold; font-size: 16px; transition: all 0.2s; box-shadow: 0 4px 0 #bbb; }
+        .btn-start { background: var(--secondary); box-shadow: 0 4px 0 #249a8f; }
+        .btn-stop { background: var(--error); box-shadow: 0 4px 0 #b01528; }
+        .btn-reset { background: var(--neutral); box-shadow: 0 4px 0 #4a5568; }
+        .btn:active { transform: translateY(2px); box-shadow: 0 2px 0 #888; }
+        .footer-note { font-size: 12px; color: #999; margin-top: 20px; font-style: italic; border-top: 1px solid #eee; padding-top: 10px; width: 100%; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div id="calibrationOverlay" class="overlay">
+        <div class="icon" style="font-size:80px">🤫</div>
+        <h1>Calibrating</h1>
+        <p>Sensitivity flipped: Right = More Sensitive!</p>
+    </div>
+    <div id="victoryOverlay" class="overlay">
+        <div class="icon" style="font-size:80px">🏅</div>
+        <h1 style="color: var(--primary);">MISSION COMPLETE!</h1>
+        <button class="btn btn-start" onclick="resetMission()" style="max-width: 200px;">Play Again</button>
+    </div>
+    <div class="header"><h2>🌟 Voice Hero v14.2.0</h2></div>
+    <div class="control-panel">
+        <div class="control-group">
+            <div class="label-row">Prolong:<span id="holdVal" class="val-text">1.0s</span></div>
+            <input type="range" id="holdSlider" min="0.1" max="3.0" step="0.1" value="1.0">
+        </div>
+        <div class="control-group">
+            <div class="label-row">Target:<span id="goalVal" class="val-text">20 ⭐</span></div>
+            <input type="range" id="goalSlider" min="5" max="200" step="5" value="20">
+        </div>
+        <div class="control-group">
+            <div class="label-row">Sensitivity:<span id="senseVal" class="val-text">50</span></div>
+            <input type="range" id="senseSlider" min="5" max="80" step="1" value="50">
+        </div>
+    </div>
+    <div id="starCounter">⭐ 0 / 20</div>
+    <div class="circle-container">
+        <svg width="220" height="220" id="syllableCircle">
+            <circle class="circle-bg" cx="110" cy="110" r="100"></circle>
+            <circle id="progressPath" class="circle-progress" cx="110" cy="110" r="100" stroke-dasharray="0 628.3"></circle>
+            <circle class="quarter-marks" cx="110" cy="110" r="100" transform="rotate(45 110 110)"></circle>
+        </svg>
+        <div id="character">🎯</div>
+    </div>
+    <div class="btn-row">
+        <button id="startBtn" class="btn btn-start">Start</button>
+        <button id="stopBtn" class="btn btn-stop">Stop</button>
+        <button id="resetBtn" class="btn btn-reset">Reset</button>
+    </div>
+    <div class="footer-note">Use in a quiet environment when using voice activated mode. Minimum hold: 1.0s.</div>
+</div>
+<script>
+    const progressPath = document.getElementById('progressPath');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const character = document.getElementById('character');
+    const holdSlider = document.getElementById('holdSlider');
+    const goalSlider = document.getElementById('goalSlider');
+    const senseSlider = document.getElementById('senseSlider');
+    const starCounter = document.getElementById('starCounter');
+    const calibrationOverlay = document.getElementById('calibrationOverlay');
+    const victoryOverlay = document.getElementById('victoryOverlay');
+    let audioCtx, analyser, dataArray, source, animationId;
+    let completedQuarters = 0, currentStars = 0, currentQuarterProgress = 0;
+    let currentVowelStartTime = null, quarterLocked = false, lastEnergy = 0, noiseFloor = 0;
+    const CIRCUMFERENCE = 2 * Math.PI * 100;
+    const RETRIGGER_THRESHOLD = 8;
+
+    holdSlider.oninput = () => document.getElementById('holdVal').innerText = parseFloat(holdSlider.value).toFixed(1) + 's';
+    goalSlider.oninput = () => { document.getElementById('goalVal').innerText = goalSlider.value + ' ⭐'; updateStarText(); };
+    senseSlider.oninput = () => document.getElementById('senseVal').innerText = senseSlider.value;
+    function updateStarText() { starCounter.innerText = `⭐ ${currentStars} / ${goalSlider.value}`; }
+    function updateCircleUI() {
+        let totalPercent = (completedQuarters + currentQuarterProgress) * 0.25;
+        let dashOffset = totalPercent * CIRCUMFERENCE;
+        progressPath.style.strokeDasharray = `${dashOffset} ${CIRCUMFERENCE}`;
+    }
+    function playDing() {
+        if(!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine'; osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.2);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + 0.2);
+    }
+    async function initAudio() {
+        try {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            source = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048; source.connect(analyser);
+            dataArray = new Uint8Array(analyser.frequencyBinCount);
+            calibrateNoise();
+        } catch (err) { alert("Microphone access is required!"); }
+    }
+    function calibrateNoise() {
+        calibrationOverlay.style.display = 'flex';
+        let samples = 0, total = 0;
+        const start = Date.now();
+        const checkNoise = () => {
+            analyser.getByteFrequencyData(dataArray);
+            let sum = 0; for(let i = 2; i < 50; i++) sum += dataArray[i];
+            total += (sum / 48); samples++;
+            if (Date.now() - start < 2000) requestAnimationFrame(checkNoise);
+            else {
+                noiseFloor = total / samples;
+                calibrationOverlay.style.display = 'none';
+                startBtn.innerText = "Listening...";
+                update();
+            }
+        };
+        checkNoise();
+    }
+    function resetMission() {
+        currentStars = 0; completedQuarters = 0; currentQuarterProgress = 0;
+        updateStarText(); updateCircleUI();
+        victoryOverlay.style.display = 'none'; character.innerText = '🎯';
+    }
+    function stopAudio() {
+        if (audioCtx) { cancelAnimationFrame(animationId); audioCtx.close(); audioCtx = null; }
+        startBtn.innerText = "Start";
+    }
+    function update() {
+        animationId = requestAnimationFrame(update);
+        analyser.getByteFrequencyData(dataArray);
+        let vowelEnergy = 0, hissEnergy = 0;
+        for(let i = 4; i < 40; i++) vowelEnergy += dataArray[i];
+        for(let i = 150; i < 500; i++) hissEnergy += dataArray[i];
+        vowelEnergy /= 36; hissEnergy /= 350;
+
+        const sensitivityHurdle = (85 - parseInt(senseSlider.value));
+        const isVowel = (vowelEnergy > (noiseFloor + sensitivityHurdle)) && (vowelEnergy > hissEnergy * 2.5);
+
+        const energyDelta = vowelEnergy - lastEnergy;
+        if (energyDelta > RETRIGGER_THRESHOLD) { quarterLocked = false; }
+        lastEnergy = vowelEnergy;
+        const now = performance.now();
+        if (isVowel) {
+            if (!quarterLocked) {
+                if (currentVowelStartTime === null) { currentVowelStartTime = now; character.innerText = '😮'; }
+                let target = parseFloat(holdSlider.value);
+                currentQuarterProgress = Math.min(((now - currentVowelStartTime) / 1000) / target, 1);
+                if (currentQuarterProgress >= 1) {
+                    completedQuarters++; currentStars++;
+                    updateStarText();
+                    currentQuarterProgress = 0; currentVowelStartTime = null;
+                    quarterLocked = true; playDing();
+                    character.innerText = '✨';
+                    if (currentStars >= parseInt(goalSlider.value)) {
+                        setTimeout(() => { stopAudio(); victoryOverlay.style.display = 'flex'; confetti(); }, 500);
+                    }
+                    if (completedQuarters >= 4) { completedQuarters = 0; }
+                }
+            }
+            updateCircleUI();
+        } else {
+            currentVowelStartTime = null; currentQuarterProgress = 0; quarterLocked = false;
+            character.innerText = '🎯'; updateCircleUI();
+        }
+    }
+    startBtn.onclick = () => { if (!audioCtx) initAudio(); };
+    stopBtn.onclick = stopAudio;
+    resetBtn.onclick = () => {
+        if(confirm("Reset current stars to zero?")) {
+            resetMission();
+        }
+    };
+</script>
+</body>
+</html>

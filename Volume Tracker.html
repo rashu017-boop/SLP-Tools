@@ -1,0 +1,160 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fullscreen Volume Tracker</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #0a0a0a; font-family: 'Segoe UI', sans-serif; }
+        canvas { display: block; width: 100vw; height: 100vh; }
+        
+        .overlay { 
+            position: absolute; top: 20px; left: 20px; 
+            background: rgba(30, 30, 30, 0.85); 
+            padding: 20px; border-radius: 12px; 
+            color: white; backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
+            width: 250px;
+            pointer-events: auto;
+        }
+
+        #db-val { font-size: 3rem; font-weight: bold; color: #00d1b2; margin-bottom: 5px; }
+        .label-text { font-size: 0.8rem; color: #aaa; text-transform: uppercase; letter-spacing: 1px; }
+        
+        .controls { margin-top: 20px; display: flex; flex-direction: column; gap: 15px; }
+        input[type=range] { width: 100%; accent-color: #00d1b2; cursor: pointer; }
+        
+        .btn-group { display: flex; gap: 10px; margin-top: 10px; }
+        button { flex: 1; padding: 10px; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        #startBtn { background: #00d1b2; color: #fff; }
+        #stopBtn { background: #ff3860; color: #fff; display: none; }
+        
+        .y-axis-label { position: absolute; color: #444; font-size: 10px; pointer-events: none; }
+    </style>
+</head>
+<body>
+
+<div class="overlay">
+    <div class="label-text">Current Volume</div>
+    <div id="db-val">0 dB</div>
+    
+    <div class="controls">
+        <div>
+            <label class="label-text">Mic Sensitivity</label>
+            <input type="range" id="sensitivity" min="1" max="15" value="5" step="0.5">
+        </div>
+        <div class="btn-group">
+            <button id="startBtn">START TRACKING</button>
+            <button id="stopBtn">STOP</button>
+        </div>
+    </div>
+</div>
+
+<canvas id="graph"></canvas>
+
+<script>
+    const dbDisplay = document.getElementById('db-val');
+    const canvas = document.getElementById('graph');
+    const ctx = canvas.getContext('2d');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const sensSlider = document.getElementById('sensitivity');
+
+    let audioCtx, analyser, dataArray, source, animationId;
+    let smoothedDb = 0;
+    const smoothingFactor = 0.15; 
+    const history = new Array(500).fill(0); // More points for a wider screen
+
+    function resize() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.onresize = resize;
+    resize();
+
+    function initAudio() {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize = 1024;
+        dataArray = new Float32Array(analyser.fftSize);
+
+        navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+            source = audioCtx.createMediaStreamSource(stream);
+            source.connect(analyser);
+            
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
+            draw();
+        }).catch(err => alert("Mic access denied: " + err));
+    }
+
+    function draw() {
+        analyser.getFloatTimeDomainData(dataArray);
+
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+            sum += dataArray[i] * dataArray[i];
+        }
+        let rms = Math.sqrt(sum / dataArray.length);
+
+        // Calculate positive dB
+        let rawDb = 20 * Math.log10((rms * sensSlider.value) / 0.00001);
+        rawDb = Math.max(0, rawDb);
+        smoothedDb = smoothedDb + (rawDb - smoothedDb) * smoothingFactor;
+
+        dbDisplay.textContent = Math.round(smoothedDb) + " dB";
+        history.push(smoothedDb);
+        history.shift();
+
+        // DRAWING
+        ctx.fillStyle = '#0a0a0a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Draw Y-Axis Reference Lines (10dB Intervals up to 120dB)
+        ctx.lineWidth = 1;
+        for (let i = 0; i <= 120; i += 10) {
+            const y = canvas.height - (i / 120) * canvas.height;
+            
+            // Grid line
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.05)';
+            ctx.beginPath();
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+            ctx.stroke();
+
+            // Label
+            ctx.fillStyle = '#444';
+            ctx.font = '10px Arial';
+            ctx.fillText(i + ' dB', canvas.width - 40, y - 5);
+        }
+
+        // Draw Volume Waveform
+        ctx.strokeStyle = '#00d1b2';
+        ctx.lineWidth = 3;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        
+        for(let i = 0; i < history.length; i++) {
+            const x = (i / history.length) * canvas.width;
+            const y = canvas.height - (history[i] / 120) * canvas.height;
+            if(i === 0) ctx.moveTo(x, y);
+            else ctx.lineTo(x, y);
+        }
+        ctx.stroke();
+
+        animationId = requestAnimationFrame(draw);
+    }
+
+    startBtn.onclick = () => initAudio();
+    stopBtn.onclick = () => {
+        if (audioCtx) {
+            audioCtx.close();
+            cancelAnimationFrame(animationId);
+            startBtn.style.display = 'block';
+            stopBtn.style.display = 'none';
+            dbDisplay.textContent = "0 dB";
+        }
+    };
+</script>
+</body>
+</html>

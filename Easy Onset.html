@@ -1,0 +1,213 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Easy Onset</title>
+    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+    <style>
+        :root { --primary: #00A8E8; --secondary: #007EA7; --bg: #FDFFFC; --text: #011627; --gold: #FFD700; --h-color: #A0E7E5; --error: #E71D36; }
+        body { font-family: 'Comic Sans MS', cursive, sans-serif; background: var(--bg); color: var(--text); display: flex; justify-content: center; padding: 20px; }
+        .card { width: 100%; max-width: 600px; background: white; padding: 30px; border-radius: 30px; border: 6px solid var(--primary); text-align: center; position: relative; box-shadow: 0 10px 30px rgba(0,0,0,0.1); }
+        .control-panel { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin: 20px 0; }
+        .control-group { background: #f0faff; padding: 15px; border-radius: 15px; border: 2px solid #e0f0f8; }
+        .label-row { display: flex; justify-content: space-between; font-weight: bold; color: var(--secondary); font-size: 13px; margin-bottom: 8px; }
+        input[type="range"] { width: 100%; accent-color: var(--primary); cursor: pointer; }
+        #starCounter { font-size: 28px; color: var(--secondary); font-weight: bold; margin-bottom: 10px; }
+        #character { font-size: 90px; height: 110px; display: flex; align-items: center; justify-content: center; }
+        .progress-stack { height: 50px; background: #eee; border-radius: 25px; overflow: hidden; border: 4px solid #ddd; margin: 15px 0; display: flex; }
+        #hBar { height: 100%; width: 0%; background: var(--h-color); transition: width 0.05s linear; border-right: 2px dashed rgba(0,0,0,0.1); }
+        #voiceBar { height: 100%; width: 0%; background: var(--gold); transition: width 0.05s linear; }
+        .btn-row { display: flex; gap: 15px; margin-top: 10px; }
+        .btn { flex: 1; color: white; border: none; padding: 18px; border-radius: 50px; cursor: pointer; font-weight: bold; font-size: 20px; transition: 0.2s; }
+        .btn-start { background: var(--primary); box-shadow: 0 5px 0 #005f7a; }
+        .btn-stop { background: var(--error); box-shadow: 0 5px 0 #b01528; }
+        .overlay { display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(255, 255, 255, 0.98); border-radius: 24px; z-index: 100; flex-direction: column; align-items: center; justify-content: center; }
+        #debug { font-size: 11px; color: #888; margin-top: 10px; font-family: monospace; background: #eee; padding: 5px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="card">
+    <div id="victoryOverlay" class="overlay">
+        <div style="font-size: 100px;">🏆</div>
+        <h2 style="color: var(--secondary);">GOAL REACHED!</h2>
+        <button class="btn btn-start" onclick="location.reload()" style="max-width: 200px;">Play Again</button>
+    </div>
+
+    <div id="calibOverlay" class="overlay">
+        <div style="background: #fff4e6; padding: 30px; border-radius: 25px; border: 4px dashed #ff9f1c;">
+            <div style="font-size: 60px;">🤫</div>
+            <h2 style="color: #ff9f1c; margin: 10px 0;">Calibrating...</h2>
+            <p style="font-weight: bold; color: #555;">Keep Environment Quiet</p>
+        </div>
+    </div>
+
+    <h2 style="color:var(--secondary); margin:0;">🌬️ Easy Onset</h2>
+    
+    <div class="control-panel">
+        <div class="control-group">
+            <div class="label-row"><span>Breath Goal:</span><span id="hVal">0.2s</span></div>
+            <input type="range" id="hSlider" min="0.1" max="2.0" step="0.1" value="0.2">
+        </div>
+        <div class="control-group">
+            <div class="label-row"><span>Word Goal:</span><span id="vVal">0.3s</span></div>
+            <input type="range" id="vSlider" min="0.1" max="1.0" step="0.1" value="0.3">
+        </div>
+        <div class="control-group" style="grid-column: span 2;">
+            <div class="label-row"><span>Target Stars:</span><span id="goalVal">5</span></div>
+            <input type="range" id="goalSlider" min="1" max="20" step="1" value="5">
+        </div>
+    </div>
+
+    <div id="starCounter">⭐ 0 / 5</div>
+    <div id="character"><span id="hero"></span></div>
+    
+    <div class="progress-stack">
+        <div id="hBar"></div>
+        <div id="voiceBar"></div>
+    </div>
+
+    <div class="btn-row">
+        <button id="startBtn" class="btn btn-start">Start Mission</button>
+        <button id="stopBtn" class="btn btn-stop">Stop</button>
+    </div>
+    <div id="debug">System Standby</div>
+</div>
+
+<script>
+    let audioCtx, analyser, freqData, active = false;
+    let currentStars = 0, noiseFloor = 10;
+    let phase = "IDLE"; 
+    let hStartTime = 0, vStartTime = 0, waitStartTime = 0;
+
+    const hSlider = document.getElementById('hSlider'), vSlider = document.getElementById('vSlider'), goalSlider = document.getElementById('goalSlider');
+    const hBar = document.getElementById('hBar'), voiceBar = document.getElementById('voiceBar'), hero = document.getElementById('hero');
+    const debug = document.getElementById('debug');
+
+    hSlider.oninput = () => document.getElementById('hVal').innerText = hSlider.value + 's';
+    vSlider.oninput = () => document.getElementById('vVal').innerText = vSlider.value + 's';
+    goalSlider.oninput = () => { document.getElementById('goalVal').innerText = goalSlider.value; updateStars(); };
+
+    function updateStars() { document.getElementById('starCounter').innerText = `⭐ ${currentStars} / ${goalSlider.value}`; }
+
+    function resetSystem() {
+        phase = "IDLE"; hStartTime = 0; vStartTime = 0; waitStartTime = 0;
+        hBar.style.width = '0%'; voiceBar.style.width = '0%'; hero.innerText = '';
+    }
+
+    async function start() {
+        if(active) return;
+        active = true;
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('calibOverlay').style.display = 'flex';
+        
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } 
+        });
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyser = audioCtx.createAnalyser(); analyser.fftSize = 2048;
+        source.connect(analyser);
+        freqData = new Uint8Array(analyser.frequencyBinCount);
+        
+        setTimeout(() => {
+            let sum = 0;
+            for(let i=0; i<30; i++) {
+                analyser.getByteFrequencyData(freqData);
+                sum += freqData.reduce((a,b) => a+b, 0) / freqData.length;
+            }
+            noiseFloor = sum / 30;
+            document.getElementById('calibOverlay').style.display = 'none';
+            update();
+        }, 1500);
+    }
+
+    function update() {
+        if(!active) return;
+        requestAnimationFrame(update);
+        analyser.getByteFrequencyData(freqData);
+
+        // Vocal range (low energy)
+        let low = 0; for(let i=4; i<14; i++) low += freqData[i]; low /= 10; 
+        
+        // Mid-range breath (The "h" friction)
+        let midBreath = 0; for(let i=37; i<116; i++) midBreath += freqData[i]; midBreath /= 79;
+        
+        // High-range breath (Air hiss)
+        let highBreath = 0; for(let i=139; i<370; i++) highBreath += freqData[i]; highBreath /= 231;
+        
+        // Final Breath Metric: Prioritize the mid-friction for light "h"
+        let totalBreath = (midBreath * 0.8) + (highBreath * 0.2);
+
+        // ULTRA-SENSITIVE DETECTION
+        // Reduced the floor buffer to 0.1 for maximum light /h/ capture
+        const allowH = (totalBreath > (noiseFloor + 0.1)) && totalBreath > (low * 0.7);
+        const allowV = low > (noiseFloor + 5) && low > (totalBreath * 1.3);
+
+        debug.innerText = `B: ${totalBreath.toFixed(2)} | V: ${low.toFixed(1)} | Floor: ${noiseFloor.toFixed(2)}`;
+
+        switch(phase) {
+            case "IDLE":
+                if (allowH && !allowV) {
+                    phase = "BREATHING";
+                    hStartTime = performance.now();
+                }
+                break;
+
+            case "BREATHING":
+                if (allowV && low > (noiseFloor + 15)) { resetSystem(); return; }
+                
+                if (allowH) {
+                    let elapsed = (performance.now() - hStartTime) / 1000;
+                    let goal = parseFloat(hSlider.value);
+                    hBar.style.width = Math.min((elapsed/goal)*50, 50) + '%';
+                    hero.innerText = '🌬️';
+                    if (elapsed >= goal) {
+                        phase = "WAITING_FOR_VOICE";
+                        waitStartTime = performance.now();
+                    }
+                } else {
+                    resetSystem();
+                }
+                break;
+
+            case "WAITING_FOR_VOICE":
+                let waitElapsed = (performance.now() - waitStartTime) / 1000;
+                hero.innerText = '⏳';
+                if (allowV) {
+                    phase = "VOICING";
+                    vStartTime = performance.now();
+                } else if (waitElapsed > 0.4) {
+                    resetSystem();
+                }
+                break;
+
+            case "VOICING":
+                if (allowV) {
+                    let elapsed = (performance.now() - vStartTime) / 1000;
+                    let goal = parseFloat(vSlider.value);
+                    voiceBar.style.width = Math.min((elapsed/goal)*50, 50) + '%';
+                    hero.innerText = '🥳';
+                    if (elapsed >= goal) {
+                        currentStars++;
+                        updateStars();
+                        confetti({ particleCount: 50, spread: 60 });
+                        if(currentStars >= goalSlider.value) {
+                            document.getElementById('victoryOverlay').style.display = 'flex';
+                            active = false;
+                        } else { resetSystem(); }
+                    }
+                } else {
+                    resetSystem();
+                }
+                break;
+        }
+    }
+
+    document.getElementById('startBtn').onclick = start;
+    document.getElementById('stopBtn').onclick = () => location.reload();
+</script>
+</body>
+</html>

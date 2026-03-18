@@ -1,0 +1,99 @@
+
+    <!DOCTYPE html>
+    <html>
+    <head><title>Metronome</title></head>
+    <body style="display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #eee;">
+        <div style="text-align: center; font-family: sans-serif; background: #fff; padding: 40px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); width: 350px;">
+            <h2 style="margin-top: 0;">Metronome</h2>
+            <canvas id="metronomeCanvas" width="200" height="200"></canvas>
+            <div style="margin-top: 20px;">
+                <input type="range" id="bpmRange" min="40" max="240" value="120" style="width: 100%;">
+                <p style="font-size: 1.5em; font-weight: bold;"><span id="bpmDisplay">120</span> BPM</p>
+                <button id="startBtn" style="padding: 15px 30px; font-size: 1em; cursor: pointer; border-radius: 5px; border: none; background: #007bff; color: white;">Start</button>
+            </div>
+        </div>
+
+        <script>
+            const canvas = document.getElementById('metronomeCanvas');
+            const ctx = canvas.getContext('2d');
+            const bpmRange = document.getElementById('bpmRange');
+            const bpmDisplay = document.getElementById('bpmDisplay');
+            const startBtn = document.getElementById('startBtn');
+
+            let bpm = 120;
+            let playing = false;
+            let animationId;
+            let audioCtx = null;
+            let nextNoteTime = 0.0;
+            const lookahead = 25.0; 
+            const scheduleAheadTime = 0.1;
+
+            function playTick(time) {
+                const osc = audioCtx.createOscillator();
+                const envelope = audioCtx.createGain();
+                osc.frequency.value = 880;
+                envelope.gain.exponentialRampToValueAtTime(1, time);
+                envelope.gain.exponentialRampToValueAtTime(0.001, time + 0.05);
+                osc.connect(envelope);
+                envelope.connect(audioCtx.destination);
+                osc.start(time);
+                osc.stop(time + 0.05);
+            }
+
+            function scheduler() {
+                while (nextNoteTime < audioCtx.currentTime + scheduleAheadTime) {
+                    playTick(nextNoteTime);
+                    nextNoteTime += 60.0 / bpm;
+                }
+                if (playing) setTimeout(scheduler, lookahead);
+            }
+
+            function draw() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.beginPath();
+                ctx.moveTo(100, 20); ctx.lineTo(150, 180); ctx.lineTo(50, 180); ctx.closePath();
+                ctx.stroke();
+
+                const time = audioCtx ? audioCtx.currentTime : 0;
+                const angle = Math.sin(time * Math.PI * (bpm / 60)) * 0.5;
+                const x = 100 + 140 * Math.sin(angle);
+                const y = 180 - 140 * Math.cos(angle);
+
+                ctx.beginPath();
+                ctx.lineWidth = 3;
+                ctx.moveTo(100, 180);
+                ctx.lineTo(x, y);
+                ctx.stroke();
+
+                ctx.beginPath();
+                ctx.arc(x, y, 8, 0, Math.PI * 2);
+                ctx.fillStyle = "red";
+                ctx.fill();
+
+                if (playing) animationId = requestAnimationFrame(draw);
+            }
+
+            startBtn.onclick = () => {
+                if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                playing = !playing;
+                if (playing) {
+                    nextNoteTime = audioCtx.currentTime;
+                    startBtn.textContent = 'Stop';
+                    startBtn.style.background = '#dc3545';
+                    scheduler();
+                    draw();
+                } else {
+                    startBtn.textContent = 'Start';
+                    startBtn.style.background = '#007bff';
+                    cancelAnimationFrame(animationId);
+                }
+            };
+
+            bpmRange.oninput = (e) => {
+                bpm = e.target.value;
+                bpmDisplay.textContent = bpm;
+            };
+        </script>
+    </body>
+    </html>
+    

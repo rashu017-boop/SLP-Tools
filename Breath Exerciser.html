@@ -1,0 +1,257 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Breath Exerciser Pro + Audio</title>
+    <style>
+        :root { --primary: #2c3e50; --accent: #3498db; --bg: #f8f9fa; --text: #333; --progress-bg: #e0e0e0; --hold-fill: rgba(52, 152, 219, 0.1); }
+        body { font-family: 'Segoe UI', sans-serif; background-color: var(--bg); color: var(--text); display: flex; flex-direction: column; align-items: center; padding: 20px; }
+        .container { max-width: 500px; width: 100%; background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); text-align: center; }
+        .session-progress-container { width: 100%; height: 6px; background: var(--progress-bg); border-radius: 3px; margin: 20px 0; overflow: hidden; }
+        #session-progress-bar { width: 0%; height: 100%; background: var(--accent); transition: width 0.3s ease; }
+        .viz-container { height: 220px; display: flex; justify-content: center; align-items: center; margin: 10px 0; position: relative; }
+        #shape-svg { width: 180px; height: 180px; }
+        .shape-path { fill: none; stroke: #eee; stroke-width: 4; transition: fill 0.5s ease; }
+        .progress-path { fill: none; stroke: var(--accent); stroke-width: 6; stroke-linecap: round; }
+        .timer-display { font-size: 4rem; font-weight: bold; margin: 5px 0; color: var(--primary); }
+        .cycle-display { font-size: 1rem; color: #666; margin-bottom: 10px; }
+        .phase-label { font-size: 1.2rem; text-transform: uppercase; letter-spacing: 2px; color: var(--accent); height: 1.5rem; font-weight: 600; }
+        .settings { margin-top: 20px; display: grid; gap: 10px; text-align: left; border-top: 1px solid #eee; padding-top: 20px; grid-template-columns: 1fr 1fr; }
+        .setting-group { display: flex; flex-direction: column; }
+        label { font-size: 0.75rem; color: #666; margin-bottom: 4px; }
+        input, select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; margin-bottom: 10px; width: 100%; box-sizing: border-box; }
+        button { width: 100%; padding: 15px; background: var(--primary); color: white; border: none; border-radius: 6px; cursor: pointer; font-weight: bold; font-size: 1rem; }
+        button.stop { background: #e74c3c; }
+        
+        .audio-controls { 
+            background: #f0f2f5; 
+            padding: 15px; 
+            border-radius: 8px; 
+            margin-bottom: 20px; 
+            display: flex; 
+            flex-direction: column; 
+            gap: 10px; 
+            align-items: center; 
+        }
+        .audio-row { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; font-weight: 600; }
+        .volume-row { width: 100%; display: flex; align-items: center; gap: 10px; }
+        .volume-row input { margin-bottom: 0; cursor: pointer; }
+        .is-holding { fill: var(--hold-fill) !important; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h2 style="margin-top:0">Breath Exerciser</h2>
+    
+    <div class="audio-controls">
+        <div class="audio-row">
+            <input type="checkbox" id="audio-enable" checked style="width: auto; margin: 0;">
+            <label for="audio-enable" style="margin: 0; cursor: pointer;">Enable Audio Cues</label>
+        </div>
+        <div class="volume-row">
+            <label style="white-space: nowrap;">Volume</label>
+            <input type="range" id="volume-slider" min="0" max="1" step="0.1" value="0.5">
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 10px; text-align: left;">
+        <div style="flex: 2;">
+            <label>Pattern</label>
+            <select id="pattern-select">
+                <option value="linear">Linear Breathing</option>
+                <option value="box" selected>Box Breathing</option>
+                <option value="triangle">Triangular Breathing</option>
+                <option value="trapezoid">Trapezoid Breathing</option>
+            </select>
+        </div>
+        <div style="flex: 1;">
+            <label>Cycles</label>
+            <input type="number" id="target-cycles" value="5" min="1">
+        </div>
+    </div>
+
+    <div class="session-progress-container"><div id="session-progress-bar"></div></div>
+    
+    <div class="viz-container">
+        <svg id="shape-svg" viewBox="0 0 100 100">
+            <path id="bg-path" class="shape-path"></path>
+            <path id="active-path" class="progress-path"></path>
+        </svg>
+    </div>
+
+    <div class="phase-label" id="phase-name">READY</div>
+    <div class="timer-display" id="timer">0</div>
+    <div class="cycle-display" id="cycle-count">Cycle: 0 / 5</div>
+    
+    <button id="start-btn">START SESSION</button>
+
+    <div class="settings" id="settings-panel"></div>
+</div>
+
+<script>
+    const patterns = {
+        linear: { path: "M 10 50 L 90 50", phases: [{name:'Inhale', d:4}, {name:'Exhale', d:4}] },
+        box: { path: "M 20 80 L 20 20 L 80 20 L 80 80 Z", phases: [{name:'Inhale', d:4}, {name:'Hold', d:4}, {name:'Exhale', d:4}, {name:'Hold', d:4}] },
+        triangle: { path: "M 15 85 L 50 15 L 85 85 Z", phases: [{name:'Inhale', d:4}, {name:'Hold', d:4}, {name:'Exhale', d:4}] },
+        trapezoid: { path: "M 5 85 L 30 20 L 70 20 L 95 85 Z", phases: [{name:'Inhale', d:4}, {name:'Hold', d:4}, {name:'Exhale', d:4}, {name:'Rest', d:2}] }
+    };
+
+    let audioCtx, masterGain, isRunning = false, phaseIndex = 0, currentCycle = 0, startTime, rafId;
+    let breathNode = null;
+
+    const bgPath = document.getElementById('bg-path'), activePath = document.getElementById('active-path');
+    const timerDisplay = document.getElementById('timer'), phaseLabel = document.getElementById('phase-name');
+    const cycleDisplay = document.getElementById('cycle-count'), startBtn = document.getElementById('start-btn');
+    const sessionBar = document.getElementById('session-progress-bar'), targetInput = document.getElementById('target-cycles');
+    const audioCheck = document.getElementById('audio-enable'), volumeSlider = document.getElementById('volume-slider');
+
+    function initAudio() {
+        if (!audioCtx) {
+            audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            masterGain = audioCtx.createGain();
+            masterGain.gain.setValueAtTime(volumeSlider.value, audioCtx.currentTime);
+            masterGain.connect(audioCtx.destination);
+        }
+    }
+
+    volumeSlider.oninput = () => {
+        if (masterGain) masterGain.gain.setTargetAtTime(volumeSlider.value, audioCtx.currentTime, 0.05);
+    };
+
+    function playDing() {
+        if (!audioCheck.checked) return;
+        const osc = audioCtx.createOscillator();
+        const localGain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(880, audioCtx.currentTime);
+        localGain.gain.setValueAtTime(0.3, audioCtx.currentTime); // Increased base gain
+        localGain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.6);
+        osc.connect(localGain);
+        localGain.connect(masterGain);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.6);
+    }
+
+    function startBreathSound(type) {
+        if (!audioCheck.checked || breathNode) return;
+        const noiseBuffer = audioCtx.createBuffer(1, audioCtx.sampleRate * 2, audioCtx.sampleRate);
+        const output = noiseBuffer.getChannelData(0);
+        for (let i = 0; i < noiseBuffer.length; i++) { output[i] = Math.random() * 2 - 1; }
+
+        const noise = audioCtx.createBufferSource();
+        noise.buffer = noiseBuffer;
+        noise.loop = true;
+
+        const filter = audioCtx.createBiquadFilter();
+        filter.type = 'lowpass';
+        const localGain = audioCtx.createGain();
+        localGain.gain.setValueAtTime(0, audioCtx.currentTime);
+        localGain.gain.linearRampToValueAtTime(0.15, audioCtx.currentTime + 0.3); // Increased volume
+
+        if (type === 'Inhale') {
+            filter.frequency.setValueAtTime(300, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(1500, audioCtx.currentTime + 4);
+        } else {
+            filter.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            filter.frequency.exponentialRampToValueAtTime(200, audioCtx.currentTime + 4);
+        }
+
+        noise.connect(filter);
+        filter.connect(localGain);
+        localGain.connect(masterGain);
+        noise.start();
+        breathNode = { source: noise, gain: localGain };
+    }
+
+    function stopBreathSound() {
+        if (breathNode) {
+            breathNode.gain.gain.linearRampToValueAtTime(0, audioCtx.currentTime + 0.2);
+            breathNode.source.stop(audioCtx.currentTime + 0.3);
+            breathNode = null;
+        }
+    }
+
+    function initSettings() {
+        const p = patterns[document.getElementById('pattern-select').value];
+        document.getElementById('settings-panel').innerHTML = p.phases.map((ph, i) => `
+            <div class="setting-group">
+                <label>${ph.name} (s)</label>
+                <input type="number" value="${ph.d}" min="1" onchange="patterns['${document.getElementById('pattern-select').value}'].phases[${i}].d = parseInt(this.value)">
+            </div>`).join('');
+        bgPath.setAttribute('d', p.path);
+        activePath.setAttribute('d', p.path);
+        resetVisuals();
+    }
+
+    function resetVisuals() {
+        const len = activePath.getTotalLength();
+        activePath.style.strokeDasharray = len;
+        activePath.style.strokeDashoffset = len;
+        bgPath.classList.remove('is-holding');
+        cycleDisplay.textContent = `Cycle: ${currentCycle} / ${targetInput.value}`;
+        sessionBar.style.width = '0%';
+    }
+
+    function animate() {
+        if (!isRunning) return;
+        const elapsed = (performance.now() - startTime) / 1000;
+        const p = patterns[document.getElementById('pattern-select').value];
+        const ph = p.phases[phaseIndex];
+
+        if (elapsed < ph.d) {
+            timerDisplay.textContent = Math.floor(ph.d - elapsed + 0.99);
+            phaseLabel.textContent = ph.name;
+            if (ph.name === 'Inhale' || ph.name === 'Exhale') {
+                if (!breathNode) startBreathSound(ph.name);
+            } else {
+                stopBreathSound();
+                bgPath.classList.add('is-holding');
+            }
+
+            let progress;
+            if (document.getElementById('pattern-select').value === 'linear') {
+                progress = (phaseIndex === 0) ? (elapsed / ph.d) : (1 - (elapsed / ph.d));
+            } else {
+                progress = (phaseIndex / p.phases.length) + ((elapsed / ph.d) / p.phases.length);
+            }
+            activePath.style.strokeDashoffset = activePath.getTotalLength() * (1 - progress);
+            
+            const global = (((currentCycle * p.phases.length) + phaseIndex + (elapsed/ph.d)) / (parseInt(targetInput.value) * p.phases.length)) * 100;
+            sessionBar.style.width = `${Math.min(global, 100)}%`;
+            rafId = requestAnimationFrame(animate);
+        } else {
+            stopBreathSound();
+            phaseIndex++;
+            if (phaseIndex >= p.phases.length) { phaseIndex = 0; currentCycle++; }
+            if (currentCycle >= parseInt(targetInput.value)) { stopSession(); return; }
+            playDing();
+            startTime = performance.now();
+            animate();
+        }
+    }
+
+    function stopSession() {
+        isRunning = false; cancelAnimationFrame(rafId);
+        stopBreathSound();
+        startBtn.textContent = 'START SESSION'; startBtn.classList.remove('stop');
+        phaseLabel.textContent = currentCycle >= targetInput.value ? 'COMPLETE' : 'READY';
+        timerDisplay.textContent = '0'; currentCycle = 0; phaseIndex = 0;
+        bgPath.classList.remove('is-holding');
+    }
+
+    startBtn.onclick = () => {
+        initAudio();
+        if (!isRunning) {
+            isRunning = true; playDing(); startTime = performance.now();
+            startBtn.textContent = 'STOP'; startBtn.classList.add('stop');
+            resetVisuals(); animate();
+        } else stopSession();
+    };
+
+    document.getElementById('pattern-select').onchange = (e) => { stopSession(); initSettings(); };
+    initSettings();
+</script>
+</body>
+</html>
